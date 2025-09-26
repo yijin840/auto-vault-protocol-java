@@ -6,7 +6,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.avpj.web3.TronConfig;
 import org.avpj.web3.TronService;
 import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.ComponentScan;
 
 import javax.annotation.PostConstruct;
 
@@ -18,6 +20,8 @@ import javax.annotation.PostConstruct;
 @SpringBootApplication
 @RequiredArgsConstructor
 @Slf4j
+@EnableAutoConfiguration
+@ComponentScan(basePackages = {"org.avpj", "org.avpj.web3"})  // 扫描 web3 包
 public class AvpjApplication {
 
     private final TronService tronService;
@@ -28,15 +32,4 @@ public class AvpjApplication {
         SpringApplication.run(AvpjApplication.class, args);
     }
 
-    @PostConstruct
-    public void after() {
-        log.info("start execute developContract.");
-//        log.info(JSONObject.toJSONString(tronConfig));
-        try {
-            tronService.developContract();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-        log.info("execute developContract success.");
-    }
 }

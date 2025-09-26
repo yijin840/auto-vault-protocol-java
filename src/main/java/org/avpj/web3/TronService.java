@@ -1,21 +1,19 @@
 package org.avpj.web3;
 
+import com.google.protobuf.ByteString;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.io.Resource;
-import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.stereotype.Service;
 import org.tron.trident.core.ApiWrapper;
 import org.tron.trident.core.utils.ByteArray;
+import org.tron.trident.proto.Chain;
+import org.tron.trident.proto.Contract;
 import org.tron.trident.proto.Response;
 import org.tron.trident.utils.Base58Check;
 import org.web3j.crypto.Credentials;
 import org.web3j.crypto.ECKeyPair;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
+import java.math.BigInteger;
 
 /**
  * @author : yijin
@@ -29,7 +27,7 @@ public class TronService {
 
     private final TronConfig tronConfig;
 
-    public void developContract() throws Exception {
+    public void processTronContracts() throws Exception {
         // 初始化 Trident 客户端
         ApiWrapper client = new ApiWrapper(tronConfig.getFullHost(), tronConfig.getSolidityNode(), tronConfig.getPrivateKey());
 
@@ -74,27 +72,6 @@ public class TronService {
         if (energyLimit < 200_000) {
             log.warn("警告: 账户能量可能不足，建议冻结 20-50 TRX 获取能量");
         }
-        compileContract();
-    }
-
-    private void compileContract() throws IOException, InterruptedException {
-        //编译和部署合约
-        PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
-        Resource resource = resolver.getResource("classpath:contracts/Vault.sol");
-
-        String contractSourceCode;
-        try (InputStream is = resource.getInputStream();
-             ByteArrayOutputStream os = new ByteArrayOutputStream()) {
-            byte[] buffer = new byte[1024];
-            int len;
-            while ((len = is.read(buffer)) != -1) {
-                os.write(buffer, 0, len);
-            }
-            contractSourceCode = new String(os.toByteArray(), StandardCharsets.UTF_8);
-        }
-        // 2. 编译合约
-        ContractCompiler contractCompiler = new ContractCompiler();
-        String[] compile = contractCompiler.compile(contractSourceCode);
-        log.info("合约编译成功，ABI为: {}", compile);
+//        log.info("compileContract.res: {}", compileContract("ttt"));
     }
 }

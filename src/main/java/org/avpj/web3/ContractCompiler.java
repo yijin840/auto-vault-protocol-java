@@ -1,106 +1,116 @@
 package org.avpj.web3;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.collect.Lists;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.io.Resource;
-import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 
-import java.io.*;
+import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.Map;
 
 @Slf4j
 public class ContractCompiler {
 
     /**
-     * 编译 Solidity 合约文件并返回字节码和 ABI。
-     *
-     * @param contractName 合约名称，例如 "MyContract"
-     * @return 包含编译结果的字符串数组，[0] 为字节码，[1] 为 ABI
-     * @throws IOException 如果文件读取或进程执行失败
+     * 编译 Hardhat 并读取 ABI/Bytecode
      */
-    public String[] compile(String contractName) throws IOException, InterruptedException {
-        // 获取合约文件
-        PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
-        Resource resource = resolver.getResource("classpath:contracts/" + contractName + ".sol");
-        if (!resource.exists()) {
-            throw new IOException("无法找到合约文件: " + contractName + ".sol");
-        }
+    public static CompileResult compileHardhat(File projectDir,
+                                               String contractPath,
+                                               String contractName)
+            throws IOException, InterruptedException {
 
-        // 将资源文件内容复制到临时文件，以便 solc 访问 (兼容Java 1.8)
-        File contractFile = File.createTempFile(contractName, ".sol");
-        try (InputStream is = resource.getInputStream();
-             OutputStream os = new FileOutputStream(contractFile)) {
-            byte[] buffer = new byte[1024];
-            int len;
-            while ((len = is.read(buffer)) != -1) {
-                os.write(buffer, 0, len);
-            }
-        }
+        log.info("开始 Hardhat 编译: {}", projectDir.getAbsolutePath());
 
-        // 1. 确定 solc 可执行文件路径
-        // 在 macOS 上，通常是 /usr/local/bin/solc
-        String solcExecutablePath = "/usr/local/bin/solc";
+        // 使用我们新创建的脚本来编译
+        String compileScriptPath = projectDir.toPath().resolve("compile_with_nvm.sh").toString();
 
-        // 2. 构建编译命令
-        List<String> command = Arrays.asList(
-                solcExecutablePath,
-                "--bin",
-                "--abi",
-                "--optimize",
-                contractFile.getAbsolutePath()
-        );
+        // 执行脚本
+        ProcessBuilder pb = new ProcessBuilder("bash", compileScriptPath);
+        pb.directory(projectDir);
+        pb.inheritIO();
+        Process p = pb.start();
+        int exitCode = p.waitFor();
 
-        log.info("执行编译命令: {}", String.join(" ", command));
-
-        // 3. 使用 ProcessBuilder 执行命令
-        ProcessBuilder processBuilder = new ProcessBuilder(command);
-        Process process = processBuilder.start();
-
-        // 4. 读取编译器的输出 (兼容Java 1.8)
-        String output = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))
-                .lines().collect(Collectors.joining("\n"));
-
-        String errorOutput = new BufferedReader(new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))
-                .lines().collect(Collectors.joining("\n"));
-
-        // 等待进程结束
-        int exitCode = process.waitFor();
-
-        // 5. 检查退出码并处理结果
         if (exitCode != 0) {
-            log.error("合约编译失败，退出码: {}", exitCode);
-            log.error("错误信息: {}", errorOutput);
-            throw new IOException("合约编译失败: " + errorOutput);
+            throw new IOException("Hardhat 编译失败，exitCode=" + exitCode);
         }
 
-        // 6. 解析输出，提取字节码和 ABI
-        String bytecode = extractValue(output, "Binary:");
-        String abi = extractValue(output, "Contract JSON ABI");
+        // 读取 artifact
+        Path artifact = projectDir.toPath()
+                .resolve("artifacts/contracts")
+                .resolve(contractPath)
+                .resolve(contractName + ".json");
 
-        // 清理临时文件
-        contractFile.delete();
+        log.info("读取 artifact: {}", artifact);
+        String json = new String(Files.readAllBytes(artifact), StandardCharsets.UTF_8);
 
-        return new String[]{bytecode, abi};
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode root = mapper.readTree(json);
+        String abi = root.get("abi").toString();
+        String bytecode = root.get("bytecode").asText();
+
+        log.info("合约 {} 编译完成", contractName);
+        return new CompileResult(abi, bytecode);
     }
 
-    private String extractValue(String output, String key) {
-        String[] lines = output.split("\n");
-        boolean foundKey = false;
-        StringBuilder value = new StringBuilder();
-        for (String line : lines) {
-            if (line.contains(key)) {
-                foundKey = true;
-                continue;
-            }
-            if (foundKey && line.trim().isEmpty()) {
-                break;
-            }
-            if (foundKey) {
-                value.append(line.trim());
+    /**
+     * 批量编译
+     */
+    public static Map<String, CompileResult> compileMultiple(File projectDir,
+                                                             Map<String, List<String>> contractInfos)
+            throws IOException, InterruptedException {
+        Map<String, CompileResult> results = new HashMap<>();
+        for (Map.Entry<String, List<String>> entry : contractInfos.entrySet()) {
+            String path = entry.getKey();
+            List<String> names = entry.getValue();
+            for (String name : names) {
+                CompileResult res = compileHardhat(projectDir, path, name);
+                results.put(name, res);
             }
         }
-        return value.toString();
+        return results;
+    }
+
+    public static class CompileResult {
+        private final String abi;
+        private final String bytecode;
+
+        public CompileResult(String abi, String bytecode) {
+            this.abi = abi;
+            this.bytecode = bytecode;
+        }
+
+        public String getAbi() {
+            return abi;
+        }
+
+        public String getBytecode() {
+            return bytecode;
+        }
+    }
+
+    public static void main(String[] args) throws Exception {
+        File project = new File(System.getProperty("user.home") +
+                "/wys/local/smart/auto-vault-protocol");
+
+        Map<String, List<String>> contracts = new HashMap<>();
+        contracts.put("Vault.sol", Lists.newArrayList("Vault"));
+        contracts.put("Proxy.sol", Lists.newArrayList("Proxy"));
+        contracts.put("ProxyFactory.sol", Lists.newArrayList("ProxyFactory"));
+
+        Map<String, CompileResult> results = compileMultiple(project, contracts);
+
+        for (Map.Entry<String, CompileResult> entry : results.entrySet()) {
+            System.out.println("=== 合约: " + entry.getKey() + " ===");
+            System.out.println("ABI: " + entry.getValue().getAbi());
+            System.out.println("Bytecode length: " + entry.getValue().getBytecode().length());
+            System.out.println();
+        }
     }
 }
