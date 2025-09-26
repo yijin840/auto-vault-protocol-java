@@ -95,22 +95,4 @@ public class ContractCompiler {
         }
     }
 
-    public static void main(String[] args) throws Exception {
-        File project = new File(System.getProperty("user.home") +
-                "/wys/local/smart/auto-vault-protocol");
-
-        Map<String, List<String>> contracts = new HashMap<>();
-        contracts.put("Vault.sol", Lists.newArrayList("Vault"));
-        contracts.put("Proxy.sol", Lists.newArrayList("Proxy"));
-        contracts.put("ProxyFactory.sol", Lists.newArrayList("ProxyFactory"));
-
-        Map<String, CompileResult> results = compileMultiple(project, contracts);
-
-        for (Map.Entry<String, CompileResult> entry : results.entrySet()) {
-            System.out.println("=== 合约: " + entry.getKey() + " ===");
-            System.out.println("ABI: " + entry.getValue().getAbi());
-            System.out.println("Bytecode length: " + entry.getValue().getBytecode().length());
-            System.out.println();
-        }
-    }
 }

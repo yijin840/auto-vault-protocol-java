@@ -1,19 +1,26 @@
 package org.avpj.web3;
 
 import com.google.protobuf.ByteString;
+import com.google.protobuf.Type;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.bouncycastle.util.encoders.Hex;
 import org.springframework.stereotype.Service;
 import org.tron.trident.core.ApiWrapper;
 import org.tron.trident.core.utils.ByteArray;
 import org.tron.trident.proto.Chain;
+import org.tron.trident.proto.Common;
 import org.tron.trident.proto.Contract;
 import org.tron.trident.proto.Response;
 import org.tron.trident.utils.Base58Check;
+import org.web3j.abi.datatypes.Utf8String;
+import org.web3j.abi.datatypes.generated.Uint256;
 import org.web3j.crypto.Credentials;
 import org.web3j.crypto.ECKeyPair;
 
 import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.Arrays;
 
 /**
  * @author : yijin
@@ -70,8 +77,58 @@ public class TronService {
         long energyLimit = resources.getEnergyLimit();
         log.info("账户能量: {}", energyLimit);
         if (energyLimit < 200_000) {
-            log.warn("警告: 账户能量可能不足，建议冻结 20-50 TRX 获取能量");
+            log.warn("警告: 账户能量可能不足，建议冻结 200 TRX 获取能量");
+//            //质押能量
+//            long engine = 500_000_000L;
+//            Response.TransactionExtention txe = client.freezeBalanceV2(tronConfig.getAddress(), engine, 1);
+//            //签名
+//            Chain.Transaction signedTransaction = client.signTransaction(txe);
+//            String txId = client.broadcastTransaction(signedTransaction);
+//            log.info("冻结交易ID: {}, 预计获得能量约: {} Energy", txId, engine / 10_000);
         }
-//        log.info("compileContract.res: {}", compileContract("ttt"));
+        //编译合约
+        ContractCompiler.CompileResult vaultResult = ContractCompiler.compileHardhat(this.tronConfig.getContractFile(), "Vault.sol", "Vault");
+        log.info("vaultResult: {}", vaultResult.getAbi());
+        log.info("vaultResult: {}", vaultResult.getBytecode());
+
+        long feeLimit = 1_000_000_000L; // 1000 TRX,最高上限
+        long consumeUserResourcePercent = 100L;
+        long originEnergyLimit = 10_000_000L;
+        long callValue = 0L;
+        String tokenId = "";
+        long tokenValue = 0L;
+
+        Response.TransactionExtention vault = client.deployContract(
+                "Vault",
+                vaultResult.getAbi(),
+                vaultResult.getBytecode(),
+                new ArrayList<>(),
+                feeLimit,
+                consumeUserResourcePercent,
+                originEnergyLimit,
+                callValue,
+                tokenId,
+                tokenValue
+        );
+
+        // 直接打印关键信息
+        log.info("=== Deploy Contract Result ===");
+        log.info("TxID           : {}", ByteArray.toHexString(vault.getTxid().toByteArray()));
+        log.info("Result Code    : {}", vault.getResult().getCode());
+        log.info("Result Message : {}", vault.getResult().getMessage().toStringUtf8());
+        log.info("Energy Used    : {}", vault.getEnergyUsed());
+
+        // 如果需要完整 protobuf 文本
+        log.info("Full Response  : {}", Hex.toHexString(vault.toByteArray()));
+
+
+        // 2. 签名
+        Chain.Transaction signed = client.signTransaction(vault.getTransaction());
+
+        // 3. 广播
+        String signedRes = client.broadcastTransaction(signed);
+
+        log.info("broadcast result: {}", signedRes);
+
     }
 }

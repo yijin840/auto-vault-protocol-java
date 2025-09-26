@@ -21,7 +21,7 @@ public class Web3Controller {
     @GetMapping("/tron")
     public String tronDevelopContracts() {
         try {
-//            tronService.developContract();
+            tronService.processTronContracts();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

@@ -6,4 +6,4 @@ tron:
   address: ${TRON_ADDRESS}
   full-host: grpc.shasta.trongrid.io:50051
   solidity-node: grpc.shasta.trongrid.io:50052
-  contract-path: classpath:contracts
+  contract-path: ${CONTRACT_PATH}
