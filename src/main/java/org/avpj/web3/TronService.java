@@ -1,32 +1,26 @@
 package org.avpj.web3;
 
-import com.google.protobuf.ByteString;
-import com.google.protobuf.Type;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.bouncycastle.util.encoders.Hex;
 import org.springframework.stereotype.Service;
+import org.tron.trident.abi.FunctionEncoder;
+import org.tron.trident.abi.datatypes.Address;
+import org.tron.trident.abi.datatypes.Function;
+import org.tron.trident.abi.datatypes.Type;
 import org.tron.trident.core.ApiWrapper;
 import org.tron.trident.core.utils.ByteArray;
 import org.tron.trident.proto.Chain;
-import org.tron.trident.proto.Common;
-import org.tron.trident.proto.Contract;
 import org.tron.trident.proto.Response;
 import org.tron.trident.utils.Base58Check;
-import org.web3j.abi.datatypes.Utf8String;
-import org.web3j.abi.datatypes.generated.Uint256;
+import org.tron.trident.utils.Numeric;
+import org.web3j.crypto.ContractUtils;
 import org.web3j.crypto.Credentials;
 import org.web3j.crypto.ECKeyPair;
 
-import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 
-/**
- * @author : yijin
- * @email : yijin840@gmail.com
- * @created : 9/24/25 5:14 PM
- **/
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -40,69 +34,58 @@ public class TronService {
 
         // Credentials 对象包含私钥、公钥和地址
         Credentials credentials = Credentials.create(tronConfig.getPrivateKey());
-
-        // 获取 ECKeyPair 对象
         ECKeyPair keyPair = credentials.getEcKeyPair();
 
-        // 1. 获取私钥生成的十六进制地址，并移除 "0x" 前缀（如果有的话）
+        // 1. 获取私钥生成的十六进制地址
         String derivedHexAddress = credentials.getAddress();
         String hexWithoutPrefix = derivedHexAddress.startsWith("0x") ? derivedHexAddress.substring(2) : derivedHexAddress;
 
-        // 2. 将十六进制地址正确转换为 Base58 格式
-        // 核心步骤：手动添加 TRON 地址的十六进制前缀 "41"，然后进行转换
+        // 2. 转换为 Base58 地址
         String hexWithPrefix41 = "41" + hexWithoutPrefix;
         byte[] fromHexStringHexBytes = ByteArray.fromHexString(hexWithPrefix41);
         String derivedBase58Address = Base58Check.bytesToBase58(fromHexStringHexBytes);
 
-        // 打印地址信息，帮助你确认格式
-//        log.info("Private Key: {}", keyPair.getPrivateKey());
-//        log.info("Public Key:  {}", keyPair.getPublicKey());
-        log.info("Derived Address (Hex):    {}", hexWithoutPrefix);
-        log.info("Derived Address (Hex41):    {}", hexWithPrefix41);
         log.info("Derived Address (Base58): {}", derivedBase58Address);
         log.info("Configured Address: {}", tronConfig.getAddress());
 
-        // 确保从私钥生成的地址与配置文件中设置的地址一致
         if (!derivedBase58Address.equals(tronConfig.getAddress())) {
             throw new Exception("私钥生成的地址与TRON_ADDRESS不匹配");
         }
 
-        // 接下来，所有API调用都使用格式统一的Base58地址
+        // 检查账户余额和能量
         long balance = client.getAccountBalance(derivedBase58Address);
         log.info("TRX 余额: {} TRX", balance / 1_000_000.0);
-        if (balance < 1_000_000) {
-            throw new Exception("账户余额不足，无法部署合约");
-        }
+        if (balance < 1_000_000) throw new Exception("账户余额不足，无法部署合约");
+
         Response.AccountResourceMessage resources = client.getAccountResource(derivedBase58Address);
         long energyLimit = resources.getEnergyLimit();
         log.info("账户能量: {}", energyLimit);
         if (energyLimit < 200_000) {
             log.warn("警告: 账户能量可能不足，建议冻结 200 TRX 获取能量");
-//            //质押能量
-//            long engine = 500_000_000L;
-//            Response.TransactionExtention txe = client.freezeBalanceV2(tronConfig.getAddress(), engine, 1);
-//            //签名
-//            Chain.Transaction signedTransaction = client.signTransaction(txe);
-//            String txId = client.broadcastTransaction(signedTransaction);
-//            log.info("冻结交易ID: {}, 预计获得能量约: {} Energy", txId, engine / 10_000);
         }
-        //编译合约
-        ContractCompiler.CompileResult vaultResult = ContractCompiler.compileHardhat(this.tronConfig.getContractFile(), "Vault.sol", "Vault");
-        log.info("vaultResult: {}", vaultResult.getAbi());
-        log.info("vaultResult: {}", vaultResult.getBytecode());
 
-        long feeLimit = 1_000_000_000L; // 1000 TRX,最高上限
+        // 1. 编译 Proxy.sol
+        ContractCompiler.CompileResult proxyResult = ContractCompiler.compileHardhat(
+                tronConfig.getContractFile(), "Proxy.sol", "Proxy"
+        );
+        log.info("Proxy ABI: {}", proxyResult.getAbi());
+        log.info("Proxy Bytecode length: {}", proxyResult.getBytecode().length());
+
+        // 2. 部署 Proxy 合约
+        ArrayList<Type<?>> constructorParams = new ArrayList<>();
+        constructorParams.add(new Address(tronConfig.getVaultAddress()));
+        long feeLimit = 1_000_000_000L;
         long consumeUserResourcePercent = 100L;
         long originEnergyLimit = 10_000_000L;
         long callValue = 0L;
         String tokenId = "";
         long tokenValue = 0L;
 
-        Response.TransactionExtention vault = client.deployContract(
-                "Vault",
-                vaultResult.getAbi(),
-                vaultResult.getBytecode(),
-                new ArrayList<>(),
+        Response.TransactionExtention proxyTx = client.deployContract(
+                "Proxy",
+                proxyResult.getAbi(),
+                proxyResult.getBytecode(),
+                constructorParams,
                 feeLimit,
                 consumeUserResourcePercent,
                 originEnergyLimit,
@@ -111,24 +94,71 @@ public class TronService {
                 tokenValue
         );
 
-        // 直接打印关键信息
-        log.info("=== Deploy Contract Result ===");
-        log.info("TxID           : {}", ByteArray.toHexString(vault.getTxid().toByteArray()));
-        log.info("Result Code    : {}", vault.getResult().getCode());
-        log.info("Result Message : {}", vault.getResult().getMessage().toStringUtf8());
-        log.info("Energy Used    : {}", vault.getEnergyUsed());
+        log.info("=== Deploy Proxy Result ===");
+        log.info("TxID           : {}", ByteArray.toHexString(proxyTx.getTxid().toByteArray()));
+        log.info("Result Code    : {}", proxyTx.getResult().getCode());
+        log.info("Result Message : {}", proxyTx.getResult().getMessage().toStringUtf8());
+        log.info("Energy Used    : {}", proxyTx.getEnergyUsed());
 
-        // 如果需要完整 protobuf 文本
-        log.info("Full Response  : {}", Hex.toHexString(vault.toByteArray()));
+        Chain.Transaction signedProxyTx = client.signTransaction(proxyTx.getTransaction());
+        String broadcastRes = client.broadcastTransaction(signedProxyTx);
+        log.info("Proxy broadcast result: {}", broadcastRes);
 
+        // ============== 3. 预测 Proxy 地址 ===============
+        // 商户地址 Base58
+        String merchantAddress = "TJSiouBApng8Efzmr2etM6xxuDAigr91GQ";
 
-        // 2. 签名
-        Chain.Transaction signed = client.signTransaction(vault.getTransaction());
+        // 预测 Proxy 部署地址（使用 CREATE2 计算）
+        String predictionAddress = getPredictionAddress(
+                hexWithPrefix41,
+                ByteArray.toHexString(Base58Check.base58ToBytes(merchantAddress)),
+                proxyResult.getBytecode().getBytes()
+        );
 
-        // 3. 广播
-        String signedRes = client.broadcastTransaction(signed);
+        // ============== 4. 编码 initialize(address) 方法的 callData ==============
+        // 构造 Trident Address 对象（直接用字节数组，不要用 Arrays.toString）
+        Address merchantParam = new Address(merchantAddress);
 
-        log.info("broadcast result: {}", signedRes);
+        // 构造 ABI 方法调用对象
+        Function function = new Function(
+                "initialize",
+                Collections.singletonList(merchantParam),
+                new ArrayList<>()
+        );
 
+        // 编码成 callData
+        String callData = FunctionEncoder.encode(function);
+
+        // ============== 5. 调用 triggerContract 初始化 Proxy ==============
+        Response.TransactionExtention initTx = client.triggerContract(
+                derivedBase58Address, // 调用者地址（你的部署者 Base58 地址）
+                predictionAddress,    // 预测的 Proxy 地址 Hex41
+                callData,             // ABI 编码好的 callData
+                0L,                   // callValue
+                0L,                   // tokenValue
+                "",                   // tokenId
+                100_000_000L          // feeLimit
+        );
+
+        // 签名并广播交易
+        Chain.Transaction signedInitTx = client.signTransaction(initTx.getTransaction());
+        String broadcastInitRes = client.broadcastTransaction(signedInitTx);
+        log.info("初始化商户地址结果: {}", broadcastInitRes);
+
+    }
+
+    public static String getPredictionAddress(String deployerHex41, String merchantHex41, byte[] proxyBytecode) {
+        String deployerHex20 = deployerHex41.startsWith("41") ? deployerHex41.substring(2) : deployerHex41;
+        byte[] deployerBytes = Numeric.hexStringToByteArray(deployerHex20);
+        if (deployerBytes.length != 20) throw new RuntimeException("Deployer address must be 20 bytes");
+
+        byte[] merchantBytes = Numeric.hexStringToByteArray(merchantHex41.startsWith("41") ?
+                merchantHex41.substring(2) : merchantHex41);
+        byte[] salt = new byte[32];
+        Arrays.fill(salt, (byte) 0);
+        System.arraycopy(merchantBytes, 0, salt, 0, Math.min(merchantBytes.length, 32));
+
+        byte[] result = ContractUtils.generateCreate2ContractAddress(deployerBytes, salt, proxyBytecode);
+        return "41" + Numeric.toHexStringNoPrefix(result);
     }
 }

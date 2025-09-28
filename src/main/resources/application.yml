@@ -7,3 +7,5 @@ tron:
   full-host: grpc.shasta.trongrid.io:50051
   solidity-node: grpc.shasta.trongrid.io:50052
   contract-path: ${CONTRACT_PATH}
+  vault-address: TCKwyAvVVMVc9zjtCvuizTRznPAUgyFwmw
+  proxy-factory-address: TBCUY2hxF6nqmqgKc3CPLanKZkgwHDVRiV

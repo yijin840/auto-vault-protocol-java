@@ -22,6 +22,8 @@ public class TronConfig {
     private String fullHost;
     private String solidityNode;
     private String contractPath;
+    private String proxyFactoryAddress;
+    private String vaultAddress;
 
     public File getContractFile() {
         File file = new File(this.contractPath);
